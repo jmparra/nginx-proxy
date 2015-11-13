@@ -1,0 +1,39 @@
+{{ define "upstream" }}
+  {{ if .Address }}
+    {{/* If we got the containers from swarm and this container's port is published to host, use host IP:PORT */}}
+    {{ if and .Container.Node.ID .Address.HostPort }}
+      # {{ .Container.Node.Name }}/{{ .Container.Name }}
+      server {{ .Container.Node.Address.IP }}:{{ .Address.HostPort }};
+    {{/* If there is no swarm node or the port is not published on host, use container's IP:PORT */}}
+    {{ else }}
+      # {{ .Container.Name }}
+      server {{ .Address.IP }}:{{ .Address.Port }};
+    {{ end }}
+  {{ else }}
+    # {{ .Container.Name }}
+    server {{ .Container.IP }} down;
+  {{ end }}
+{{ end }}
+
+stream {
+  {{ range $ports, $containers := groupByMulti $ "Env.TCP_PORT" "," }}
+
+  {{ $ports := split $ports ":" }}
+  {{ $namespace := index $ports 0 }}
+  {{ $host_port := index $ports 1 }}
+
+  upstream {{ $namespace }} {
+  {{ range $container := $containers }}
+      {{ $port := index $ports 1 }}
+      {{ $address := where $container.Addresses "Port" $port | first }}
+      {{ template "upstream" (dict "Container" $container "Address" $address) }}
+  {{ end }}
+  }
+
+  server {
+    listen {{ $host_port }};
+    proxy_pass {{ $namespace }};
+  }
+
+  {{ end }}
+}
